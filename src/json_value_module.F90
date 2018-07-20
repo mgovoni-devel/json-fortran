@@ -99,6 +99,10 @@
     !      "value": 0.1E+1
     !    }
     !````
+    !
+    !@warning Pointers of this type should only be allocated
+    !         using the methods from [[json_core(type)]].
+
     type,public :: json_value
 
         !force the constituents to be stored contiguously
@@ -717,30 +721,31 @@
                                                                            !! children for duplicate keys
 
         !other private routines:
-        procedure :: name_equal
-        procedure :: name_strings_equal
-        procedure :: json_value_print
-        procedure :: string_to_int
-        procedure :: string_to_dble
-        procedure :: parse_value
-        procedure :: parse_number
-        procedure :: parse_string
-        procedure :: parse_for_chars
-        procedure :: parse_object
-        procedure :: parse_array
-        procedure :: annotate_invalid_json
-        procedure :: pop_char
-        procedure :: push_char
-        procedure :: get_current_line_from_file_stream
-        procedure :: get_current_line_from_file_sequential
-        procedure :: convert
-        procedure :: to_string
-        procedure :: to_logical
-        procedure :: to_integer
-        procedure :: to_double
-        procedure :: to_null
-        procedure :: to_object
-        procedure :: to_array
+        procedure        :: name_equal
+        procedure        :: name_strings_equal
+        procedure        :: json_value_print
+        procedure        :: string_to_int
+        procedure        :: string_to_dble
+        procedure        :: parse_value
+        procedure        :: parse_number
+        procedure        :: parse_string
+        procedure        :: parse_for_chars
+        procedure        :: parse_object
+        procedure        :: parse_array
+        procedure        :: annotate_invalid_json
+        procedure        :: pop_char
+        procedure        :: push_char
+        procedure        :: get_current_line_from_file_stream
+        procedure,nopass :: get_current_line_from_file_sequential
+        procedure        :: convert
+        procedure        :: to_string
+        procedure        :: to_logical
+        procedure        :: to_integer
+        procedure        :: to_double
+        procedure        :: to_null
+        procedure        :: to_object
+        procedure        :: to_array
+        procedure,nopass :: json_value_clone_func
 
     end type json_core
     !*********************************************************
@@ -1139,8 +1144,7 @@
                                       !! (it must not already be associated)
 
     !call the main function:
-    ! [note: this is not part of json_core class]
-    call json_value_clone_func(from,to)
+    call json%json_value_clone_func(from,to)
 
     end subroutine json_clone
 !*****************************************************************************************
@@ -2027,6 +2031,17 @@
 !@note The original FSON version of this
 !      routine was not properly freeing the memory.
 !      It was rewritten.
+!
+!@note This routine destroys this variable, it's children, and
+!      (if `destroy_next` is true) the subsequent elements in
+!      an object or array. It does not destroy the parent or
+!      previous elements.
+!
+!@Note There is some protection here to enable destruction of
+!      improperly-created linked lists. However, likely there
+!      are cases not handled. Use the [[json_value_validate]]
+!      method to validate a JSON structure that was manually
+!      created using [[json_value]] pointers.
 
     recursive subroutine json_value_destroy(json,p,destroy_next)
 
@@ -2037,8 +2052,10 @@
     logical(LK),intent(in),optional :: destroy_next !! if true, then `p%next`
                                                     !! is also destroyed (default is true)
 
-    logical(LK) :: des_next
-    type(json_value), pointer :: child
+    logical(LK)              :: des_next  !! local copy of `destroy_next`
+                                          !! optional argument
+    type(json_value),pointer :: child     !! for getting child elements
+    logical                  :: circular  !! to check to malformed linked lists
 
     if (associated(p)) then
 
@@ -2052,16 +2069,26 @@
 
         call destroy_json_data(p)
 
+        if (associated(p%next)) then
+            ! check for circular references:
+            if (associated(p, p%next)) nullify(p%next)
+        end if
+
         if (associated(p%children)) then
             do while (p%n_children > 0)
                 child => p%children
                 if (associated(child)) then
                     p%children => p%children%next
                     p%n_children = p%n_children - 1
-                    call json%destroy(child,.false.)
+                    ! check children for circular references:
+                    circular = (associated(p%children) .and. &
+                                associated(p%children,child))
+                    call json%destroy(child,destroy_next=.false.)
+                    if (circular) exit
                 else
-                    call json%throw_exception('Error in json_value_destroy: '//&
-                                              'Malformed JSON linked list')
+                    ! it is a malformed JSON object. But, we will
+                    ! press ahead with the destroy process, since
+                    ! otherwise, there would be no way to destroy it.
                     exit
                 end if
             end do
@@ -2071,11 +2098,11 @@
 
         if (associated(p%next) .and. des_next) call json%destroy(p%next)
 
-        if (associated(p%previous)) nullify(p%previous)
-        if (associated(p%parent))   nullify(p%parent)
-        if (associated(p%tail))     nullify(p%tail)
+        nullify(p%previous)
+        nullify(p%parent)
+        nullify(p%tail)
 
-        deallocate(p)
+        if (associated(p)) deallocate(p)
         nullify(p)
 
     end if
@@ -2128,8 +2155,10 @@
                                                 !! * If `destroy` is present and true, it is destroyed.
                                                 !! * If `destroy` is present and false, it is not destroyed.
 
-    type(json_value),pointer :: parent,previous,next
-    logical(LK) :: destroy_it
+    type(json_value),pointer :: parent     !! pointer to parent
+    type(json_value),pointer :: previous   !! pointer to previous
+    type(json_value),pointer :: next       !! pointer to next
+    logical(LK)              :: destroy_it !! if `p` should be destroyed
 
     if (associated(p)) then
 
@@ -2298,11 +2327,16 @@
     implicit none
 
     class(json_core),intent(inout) :: json
-    type(json_value),pointer       :: p1
-    type(json_value),pointer       :: p2
+    type(json_value),pointer       :: p1  !! swap with `p2`
+    type(json_value),pointer       :: p2  !! swap with `p1`
 
-    logical :: same_parent,first_last,adjacent
-    type(json_value),pointer :: a,b
+    logical                  :: same_parent !! if `p1` and `p2` have the same parent
+    logical                  :: first_last  !! if `p1` and `p2` are the first,last or
+                                            !! last,first children of a common parent
+    logical                  :: adjacent    !! if `p1` and `p2` are adjacent
+                                            !! elements in an array
+    type(json_value),pointer :: a           !! temporary variable
+    type(json_value),pointer :: b           !! temporary variable
 
     if (json%exception_thrown) return
 
@@ -2323,8 +2357,6 @@
                                 associated(p2%parent) .and. &
                                 associated(p1%parent,p2%parent) )
                 if (same_parent) then
-                    !if p1,p2 are the first,last or last,first
-                    !children of a common parent
                     first_last = (associated(p1%parent%children,p1) .and. &
                                   associated(p2%parent%tail,p2)) .or. &
                                  (associated(p1%parent%tail,p1) .and. &
@@ -2657,9 +2689,15 @@
 
             ! now, check next one:
             if (associated(p%next)) then
-                ! if it's an element in an
-                ! array, then require a parent:
-                call check_if_valid(p%next,require_parent=.true.)
+                if (associated(p,p%next)) then
+                    error_msg = 'circular linked list'
+                    is_valid = .false.
+                    return
+                else
+                    ! if it's an element in an
+                    ! array, then require a parent:
+                    call check_if_valid(p%next,require_parent=.true.)
+                end if
             end if
 
             if (associated(p%children)) then
@@ -3743,7 +3781,7 @@
     logical(LK),intent(in),optional      :: trim_str     !! if TRIM() should be called for each element
     logical(LK),intent(in),optional      :: adjustl_str  !! if ADJUSTL() should be called for each element
 
-    call json%json_add_string_by_path(me,to_unicode(path),value,found,was_created)
+    call json%json_add_string_by_path(me,to_unicode(path),value,found,was_created,trim_str,adjustl_str)
 
     end subroutine json_add_string_by_path_path_ascii
 !*****************************************************************************************
@@ -3766,7 +3804,7 @@
     logical(LK),intent(in),optional      :: trim_str     !! if TRIM() should be called for each element
     logical(LK),intent(in),optional      :: adjustl_str  !! if ADJUSTL() should be called for each element
 
-    call json%json_add_string_by_path(me,path,to_unicode(value),found,was_created)
+    call json%json_add_string_by_path(me,path,to_unicode(value),found,was_created,trim_str,adjustl_str)
 
     end subroutine json_add_string_by_path_value_ascii
 !*****************************************************************************************
@@ -4133,7 +4171,7 @@
     logical(LK),intent(in),optional  :: adjustl_str      !! if ADJUSTL() should be called for each element
 
     call json%json_add_string_vec_by_path(me,to_unicode(path),value,&
-                                            found,was_created,ilen)
+                                            found,was_created,ilen,trim_str,adjustl_str)
 
     end subroutine json_add_string_vec_by_path_path_ascii
 !*****************************************************************************************
@@ -8899,11 +8937,10 @@
 !  The file is assumed to be opened.
 !  This is the SEQUENTIAL version (see also [[get_current_line_from_file_stream]]).
 
-    subroutine get_current_line_from_file_sequential(json,iunit,line)
+    subroutine get_current_line_from_file_sequential(iunit,line)
 
     implicit none
 
-    class(json_core),intent(inout)                   :: json
     integer(IK),intent(in)                           :: iunit  !! file unit number
     character(kind=CK,len=:),allocatable,intent(out) :: line   !! current line
 
