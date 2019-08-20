@@ -11,6 +11,9 @@
 
 cmake_minimum_required ( VERSION 2.8.8 FATAL_ERROR )
 
+# Use MSVS folders to organize projects on windows
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 set(PROJECT_DESCRIPTION "A Fortran 2008 JSON API")
 set(PROJECT_URL "https://github.com/jacobwilliams/json-fortran")
 
@@ -32,6 +35,40 @@ include ( "cmake/checkOutOfSource.cmake" )
 # Declare project name
 #---------------------
 project ( jsonfortran NONE )
+
+if(CMAKE_Fortran_COMPILER_ID STREQUAL GNU)
+  option(JSON_FORTRAN_USE_OpenCoarrays
+    "Build JSON-Fortran with support for linking against OpenCoarray programs" OFF)
+endif()
+if(JSON_FORTRAN_USE_OpenCoarrays)
+  find_package(OpenCoarrays)
+endif()
+
+#---------------------
+# Real and Integer kinds
+#---------------------
+
+SET(JSON_REAL_KIND "REAL64" CACHE STRING "Real kind parameter")
+SET_PROPERTY(CACHE JSON_REAL_KIND PROPERTY STRINGS REAL32 REAL64 REAL128)
+if(${JSON_REAL_KIND} MATCHES "REAL32")
+  add_definitions(-DREAL32)
+elseif(${JSON_REAL_KIND} MATCHES "REAL64")
+  add_definitions(-DREAL64)
+elseif(${JSON_REAL_KIND} MATCHES "REAL128")
+  add_definitions(-DREAL128)
+endif()
+
+SET(JSON_INT_KIND "INT32" CACHE STRING "Integer kind parameter")
+SET_PROPERTY(CACHE JSON_INT_KIND PROPERTY STRINGS INT8 INT16 INT32 INT64)
+if(${JSON_INT_KIND} MATCHES "INT8")
+  add_definitions(-DINT8)
+elseif(${JSON_INT_KIND} MATCHES "INT16")
+  add_definitions(-DINT16)
+elseif(${JSON_INT_KIND} MATCHES "INT32")
+  add_definitions(-DINT32)
+elseif(${JSON_INT_KIND} MATCHES "INT64")
+  add_definitions(-DINT64)
+endif()
 
 #----------------------------------
 # Get version (semantic versioning)
@@ -132,6 +169,14 @@ endif ()
 set ( LIB_NAME ${CMAKE_PROJECT_NAME} )
 add_library ( ${LIB_NAME}        SHARED ${JF_LIB_SRCS} )
 add_library ( ${LIB_NAME}-static STATIC ${JF_LIB_SRCS} )
+
+if(JSON_FORTRAN_USE_OpenCoarrays)
+  target_link_libraries(${LIB_NAME}
+    PRIVATE OpenCoarrays::caf_mpi_static)
+  target_link_libraries(${LIB_NAME}-static
+    PRIVATE OpenCoarrays::caf_mpi_static)
+endif()
+
 set_target_properties ( ${LIB_NAME}-static
   PROPERTIES
   OUTPUT_NAME ${LIB_NAME}
@@ -239,17 +284,16 @@ if ( ENABLE_TESTS )
   enable_testing()
 
   # emulate GNU Autotools `make check`
-  add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND})
+  add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} -C $<CONFIG> --output-on-failure)
+  add_custom_target(build_tests) # Make target to build all tests
+  add_dependencies(build_tests ${LIB_NAME} ${LIB_NAME}-static)
 
   find_program ( JSONLINT jsonlint )
-  find_program ( DIFF     diff )
-  file ( COPY "${CMAKE_SOURCE_DIR}/files"
-    DESTINATION "${CMAKE_BINARY_DIR}/" )
 
-  set ( DATA_DIR "${CMAKE_BINARY_DIR}/files" )
+  set ( DATA_DIR "${CMAKE_SOURCE_DIR}/files" )
 
   set_directory_properties ( PROPERTIES ADDITIONAL_MAKE_CLEAN_FILES
-    "${DATA_DIR}/test2.json;${DATA_DIR}/test4.json;${FORD_CLEAN_OUTPUTS}" )
+    "${FORD_CLEAN_OUTPUTS}" )
 
   # Validate input
   if ( JSONLINT )
@@ -263,41 +307,56 @@ if ( ENABLE_TESTS )
     foreach ( VALID_JSON ${JSON_INPUTS} )
       get_filename_component ( TESTNAME "${VALID_JSON}" NAME )
       add_test ( NAME validate-${TESTNAME}
-	WORKING_DIRECTORY "${DATA_DIR}/inputs"
-	COMMAND ${JSONLINT} "--allow=nonescape-characters" "${VALID_JSON}" )
+	      WORKING_DIRECTORY "${DATA_DIR}/inputs"
+	      COMMAND ${JSONLINT} "--allow=nonescape-characters" "${VALID_JSON}" )
     endforeach ()
 
     foreach ( INVALID ${INVALID_JSON} )
       get_filename_component ( TESTNAME "${INVALID}" NAME )
       add_test ( NAME validate-${TESTNAME}
-	WORKING_DIRECTORY "${DATA_DIR}/inputs"
-	COMMAND ${JSONLINT} "${INVALID}" )
+	      WORKING_DIRECTORY "${DATA_DIR}/inputs"
+	      COMMAND ${JSONLINT} "${INVALID}" )
       set_property ( TEST validate-${TESTNAME}
-	PROPERTY
-	WILL_FAIL TRUE)
+	      PROPERTY
+	      WILL_FAIL TRUE)
     endforeach ()
   endif ()
+
+  add_test(NAME jf-cleanup-fixture
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E remove_directory "${CMAKE_BINARY_DIR}/files")
+  set_tests_properties(jf-cleanup-fixture
+    PROPERTIES FIXTURES_SETUP JF)
+  add_test(NAME jf-setup-fixture
+    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${DATA_DIR}" "${CMAKE_BINARY_DIR}/files")
+  set_tests_properties(jf-setup-fixture
+    PROPERTIES FIXTURES_SETUP JF
+    DEPENDS jf-cleanup-fixture)
 
   set ( UNIT_TESTS '' )
   foreach ( UNIT_TEST ${JF_TEST_SRCS} )
     get_filename_component ( TEST ${UNIT_TEST} NAME_WE )
     if(MSVC_IDE)
-    link_directories(${CMAKE_BINARY_DIR}/lib)
+      link_directories(${CMAKE_BINARY_DIR}/lib)
     endif()
     add_executable ( ${TEST} EXCLUDE_FROM_ALL ${UNIT_TEST} )
     target_link_libraries ( ${TEST} ${LIB_NAME} )
     add_dependencies ( check ${TEST} )
+    add_dependencies ( build_tests ${TEST} )
     set_target_properties ( ${TEST}
       PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin )
     add_test( NAME ${TEST}
       WORKING_DIRECTORY ${CMAKE_BINARY_DIR}/bin
       COMMAND ./${TEST})
+    set_tests_properties( ${TEST}
+      PROPERTIES FIXTURES_REQUIRED JF)
     list ( APPEND UNIT_TESTS ${TEST} )
     if ( JSONLINT )
       set_property ( TEST ${TEST}
-	APPEND
-	PROPERTY DEPENDS validate-input1 validate-input2 )
+	      APPEND
+	      PROPERTY DEPENDS validate-input1 validate-input2 )
     endif()
   endforeach ( UNIT_TEST )
 
@@ -306,39 +365,42 @@ if ( ENABLE_TESTS )
     PROPERTY DEPENDS jf_test_02 )
 
   # Validate output
+  file( GLOB EXPECTED_OUTPUTS "${DATA_DIR}/expected-outputs/*.json")
+  if (NOT ${ENABLE_UNICODE})
+    list( REMOVE_ITEM EXPECTED_OUTPUTS "${DATA_DIR}/expected-outputs/hello-world-ucs4.json")
+  endif()
+  list( REMOVE_ITEM EXPECTED_OUTPUTS "${DATA_DIR}/expected-outputs/example2.json")
+
   if ( JSONLINT )
-    file ( GLOB JSON_FILES "${DATA_DIR}/*.json" )
-    foreach ( JSON_FILE ${JSON_FILES} )
+    foreach ( JSON_FILE ${EXPECTED_OUTPUTS} )
       get_filename_component ( TESTNAME ${JSON_FILE} NAME )
       add_test ( NAME validate-output-${TESTNAME}
-	WORKING_DIRECTORY "${DATA_DIR}"
-	COMMAND ${JSONLINT} "--allow=nonescape-characters" ${TESTNAME} )
+	      WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/files"
+	      COMMAND ${JSONLINT} "--allow=nonescape-characters" ${TESTNAME} )
       set_property ( TEST validate-output-${TESTNAME}
-	APPEND
-	PROPERTY
-	DEPENDS ${UNIT_TESTS}
-	REQUIRED_FILES ${JSON_FILES} )
+	      APPEND
+	      PROPERTY
+	      DEPENDS ${UNIT_TESTS})
     endforeach ( JSON_FILE )
   endif ()
 
   # Check output for differences
-  if ( DIFF )
-    file ( GLOB JSON_FILES "${DATA_DIR}/*.json" )
-    foreach ( JSON_FILE ${JSON_FILES} )
-      get_filename_component ( JSON_STEM ${JSON_FILE} NAME_WE )
-      add_test ( NAME regression-${JSON_STEM}.json
-	WORKING_DIRECTORY "${DATA_DIR}"
-	COMMAND ${DIFF} -q ${JSON_STEM}.json expected-outputs/${JSON_STEM}.json )
-      set_property ( TEST regression-${JSON_STEM}.json
-	APPEND
-	PROPERTY
-	DEPENDS ${UNIT_TESTS}
-	REQUIRED_FILES ${JSON_FILES} )
-    endforeach ( JSON_FILE )
-  else ()
-    message ( WARNING
-      "For full test coverage diff, or a similar tool must be present on your system" )
-  endif ()
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.14)
+    set( JSON_FORTRAN_COMPARE_FLAG "--ignore-eol")
+  endif()
+
+  foreach ( JSON_FILE ${EXPECTED_OUTPUTS} )
+    get_filename_component (OUTPUT ${JSON_FILE} NAME )
+    add_test ( NAME regression-${OUTPUT}
+	    WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/files"
+	    COMMAND ${CMAKE_COMMAND} -E compare_files ${JSON_FORTRAN_COMPARE_FLAG} ${OUTPUT} expected-outputs/${OUTPUT} )
+    set_property ( TEST regression-${OUTPUT}
+	    APPEND
+	    PROPERTY
+	    DEPENDS ${UNIT_TESTS}
+	    REQUIRED_FILES ${EXPECTED_OUTPUTS} )
+  endforeach ( JSON_FILE )
+
 
 endif ()
 
@@ -354,7 +416,14 @@ install ( TARGETS ${LIB_NAME} ${LIB_NAME}-static
 # Code to  fix the dylib install name on Mac.
 include ( cmake/fixupInstallNameDir.cmake )
 
-install ( DIRECTORY "${MODULE_DIR}/" DESTINATION  "${INSTALL_MOD_DIR}" )
+set(MOD_DIR_TO_INSTALL "${MODULE_DIR}")
+set(MOD_DESTINATION_DIR "${INSTALL_MOD_DIR}")
+install(
+  CODE "file(GLOB_RECURSE MODULE_FILES \"${MOD_DIR_TO_INSTALL}/*.mod\")"
+  CODE "file(GLOB_RECURSE SUBMOD_FILES \"${MOD_DIR_TO_INSTALL}/*.smod\")"
+  CODE "file(INSTALL \${MODULE_FILES} DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MOD_DESTINATION_DIR}\")"
+  CODE "file(INSTALL \${SUBMOD_FILES} DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${MOD_DESTINATION_DIR}\")"
+  )
 
 #------------------------------------------
 # Add portable unistall command to makefile

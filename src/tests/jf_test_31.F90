@@ -43,7 +43,7 @@ contains
 
     call json%initialize(strict_type_checking = .false.)
 
-    call json%load_from_string(json_string)
+    call json%deserialize(json_string)
     if (json%failed()) then
         call json%print_error_message(error_unit)
         error_cnt = error_cnt + 1
@@ -94,7 +94,7 @@ contains
 end module jf_test_31_mod
 !*****************************************************************************************
 
-#ifndef INTERGATED_TESTS
+#ifndef INTEGRATED_TESTS
 !*****************************************************************************************
 program jf_test_31
 

@@ -3,13 +3,13 @@
 !  Module for the sixth unit test.
 !
 !# HISTORY
-!  * Izaak Beekman : 2/18/2015 : Created (refactoried original json_example.f90 file)
+!  * Izaak Beekman : 2/18/2015 : Created (refactored original json_example.f90 file)
 
 module jf_test_6_mod
 
     use json_module, CK => json_CK, LK => json_LK
     use json_parameters, only: newline
-    use, intrinsic :: iso_fortran_env , only: error_unit, output_unit, wp => real64
+    use, intrinsic :: iso_fortran_env , only: error_unit, output_unit
 
     implicit none
 
@@ -34,9 +34,13 @@ contains
     character(kind=CK,len=:),allocatable :: expected_error_msg
     logical(LK) :: status_ok
 
-    character(len=*),dimension(3),parameter :: files = ['invalid.json ',&
+    character(len=*),dimension(5),parameter :: files = ['invalid.json ',&
                                                         'invalid2.json',&
-                                                        'invalid3.json']
+                                                        'invalid3.json',&
+                                                        'invalid4.json',&
+                                                        '             ']
+
+    character(len=*),parameter :: invalid_str = '{"a":1} "b": 2}'  !! invalid JSON string
 
     error_cnt = 0
     call json%initialize()
@@ -55,9 +59,15 @@ contains
 
         ! parse the json file:
         write(error_unit,'(A)') ''
-        write(error_unit,'(A)') 'load file: '//trim(files(i))
-        write(error_unit,'(A)') ''
-        call json%load_file(filename = dir//trim(files(i)))
+        if (files(i)=='') then
+            write(error_unit,'(A)') 'load string: '//invalid_str
+            write(error_unit,'(A)') ''
+            call json%deserialize(str = invalid_str)
+        else
+            write(error_unit,'(A)') 'load file: '//trim(files(i))
+            write(error_unit,'(A)') ''
+            call json%load(filename = dir//trim(files(i)))
+        end if
         if (json%failed()) then
 
             if (i==1) then
@@ -101,7 +111,7 @@ contains
 end module jf_test_6_mod
 !*****************************************************************************************
 
-#ifndef INTERGATED_TESTS
+#ifndef INTEGRATED_TESTS
 !*****************************************************************************************
 program jf_test_6
 

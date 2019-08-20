@@ -23,7 +23,6 @@ contains
     integer,intent(out) :: error_cnt
     integer :: i !! counter
     integer :: j !! counter
-    integer :: k !! counter
     type(json_core) :: json
     type(json_value),pointer :: p, p_var
     character(kind=CK,len=:),allocatable :: path_ck
@@ -45,7 +44,7 @@ contains
 
     call json%initialize()
 
-    call json%parse(p,json_string)
+    call json%deserialize(p,json_string)
     if (json%failed()) then
         call json%print_error_message(error_unit)
         error_cnt = error_cnt + 1
@@ -110,7 +109,7 @@ contains
 end module jf_test_32_mod
 !*****************************************************************************************
 
-#ifndef INTERGATED_TESTS
+#ifndef INTEGRATED_TESTS
 !*****************************************************************************************
 program jf_test_32
 

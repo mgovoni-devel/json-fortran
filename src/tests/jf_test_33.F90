@@ -47,7 +47,7 @@ contains
 
     call json%initialize()
 
-    call json%parse(p,json_string)
+    call json%deserialize(p,json_string)
     if (json%failed()) then
         call json%print_error_message(error_unit)
         error_cnt = error_cnt + 1
@@ -67,7 +67,7 @@ contains
                 error_cnt = error_cnt + 1
                 exit
             end if
-            call json%print(p_var_clone,output_unit)
+            call json%print(p_var_clone,int(output_unit,IK))
             call json%validate(p_var_clone,is_valid,error_msg)
             if (.not. is_valid) then
                 error_cnt = error_cnt + 1
@@ -94,7 +94,7 @@ contains
 end module jf_test_33_mod
 !*****************************************************************************************
 
-#ifndef INTERGATED_TESTS
+#ifndef INTEGRATED_TESTS
 !*****************************************************************************************
 program jf_test_33
 

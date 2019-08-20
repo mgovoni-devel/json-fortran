@@ -53,8 +53,8 @@ contains
     write(error_unit,'(A)') 'JSON data:'
     write(error_unit,'(A)') '-------------'
     write(error_unit,'(A)') ''
-    call json%parse(p,json_example)
-    call json%print(p,error_unit)
+    call json%deserialize(p,json_example)
+    call json%print(p,int(error_unit,IK))
 
     !get some info:
     call json%get(p,ck_'matrix',p_matrix)
@@ -163,7 +163,7 @@ contains
 end module jf_test_19_mod
 !*****************************************************************************************
 
-#ifndef INTERGATED_TESTS
+#ifndef INTEGRATED_TESTS
 !*****************************************************************************************
 program jf_test_19
 

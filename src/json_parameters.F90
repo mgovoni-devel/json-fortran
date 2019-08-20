@@ -29,13 +29,16 @@
                                                  !! (see [[json_file_variable_info]] and [[json_info]])
     integer(IK),parameter :: json_array     = 3  !! Array JSON data type
                                                  !! (see [[json_file_variable_info]] and [[json_info]])
-    integer(IK),parameter :: json_logical   = 4  !! Logical JSON data type
+    integer(IK),parameter :: json_logical   = 4  !! Logical JSON data type (`logical(LK)`)
                                                  !! (see [[json_file_variable_info]] and [[json_info]])
-    integer(IK),parameter :: json_integer   = 5  !! Integer JSON data type
+    integer(IK),parameter :: json_integer   = 5  !! Integer JSON data type (`integer(IK)`)
+                                                 !! (see [[json_file_variable_info]] and [[json_info]]).
+    integer(IK),parameter :: json_real      = 6  !! Real number JSON data type (`real(RK)`)
                                                  !! (see [[json_file_variable_info]] and [[json_info]])
-    integer(IK),parameter :: json_double    = 6  !! Double JSON data type
+    integer(IK),parameter :: json_string    = 7  !! String JSON data type (`character(CK)`)
                                                  !! (see [[json_file_variable_info]] and [[json_info]])
-    integer(IK),parameter :: json_string    = 7  !! String JSON data type
+    integer(IK),parameter :: json_double    = json_real  !! Equivalent to `json_real` for
+                                                         !! backward compatibility.
 
     !special JSON characters
     character(kind=CK,len=*),parameter :: space           = CK_' '  !! space character
@@ -53,20 +56,25 @@
     character(kind=CK,len=*),parameter :: this            = CK_'@'  !! 'this' for [[json_get_by_path_default]]
     character(kind=CK,len=*),parameter :: dot             = CK_'.'  !! path separator for [[json_get_by_path_default]]
     character(kind=CK,len=*),parameter :: tilde           = CK_'~'  !! RFC 6901 escape character
-    character(kind=CK,len=*),parameter :: percent         = CK_'%'  !! Fortran path separator
     character(kind=CK,len=*),parameter :: single_quote    = CK_"'"  !! for JSONPath bracket-notation
+    character(kind=CK,len=*),parameter :: slash           = CK_'/'  !! JSON special character
+    character(kind=CK,len=*),parameter :: backslash       = CK_'\'  !! JSON special character
+    character(kind=CK,len=*),parameter :: quotation_mark  = CK_'"'  !! JSON special character
     character(kind=CK,len=*),parameter :: bspace          = achar(8,  kind=CK) !! JSON special character
     character(kind=CK,len=*),parameter :: horizontal_tab  = achar(9,  kind=CK) !! JSON special character
     character(kind=CK,len=*),parameter :: newline         = achar(10, kind=CK) !! JSON special character
     character(kind=CK,len=*),parameter :: formfeed        = achar(12, kind=CK) !! JSON special character
     character(kind=CK,len=*),parameter :: carriage_return = achar(13, kind=CK) !! JSON special character
-    character(kind=CK,len=*),parameter :: quotation_mark  = achar(34, kind=CK) !! JSON special character
-    character(kind=CK,len=*),parameter :: slash           = achar(47, kind=CK) !! JSON special character
-    character(kind=CK,len=*),parameter :: backslash       = achar(92, kind=CK) !! JSON special character
 
+    !> default real number format statement (for writing real values to strings and files).
+    !  Note that this can be overridden by calling [[json_initialize]].
+#ifdef REAL32
+    character(kind=CDK,len=*),parameter :: default_real_fmt = '(ss,E17.8E3)'
+#elif REAL128
+    character(kind=CDK,len=*),parameter :: default_real_fmt = '(ss,E46.35E5)'
+#else
     character(kind=CDK,len=*),parameter :: default_real_fmt = '(ss,E27.17E4)'
-        !! default real number format statement (for writing real values to strings and files).
-        !! Note that this can be overridden by calling [[json_initialize]].
+#endif
 
     character(kind=CK,len=*),parameter :: star = CK_'*' !! for invalid numbers and
                                                         !! list-directed real output
@@ -113,16 +121,21 @@
         !! 6 = sign + leading 0 + decimal + 'E' + exponent sign + 1 extra
     character(kind=CDK,len=*),parameter :: int_fmt  = '(ss,I0)' !! minimum width format for integers
 
-    integer(IK),parameter :: max_integer_str_len = 256 !! maximum string length of an integer.
-                                                       !! This is totally arbitrary (any way
-                                                       !! to get the compiler to tell us this?)
+    integer(IK),parameter :: max_integer_str_len = 256_IK !! maximum string length of an integer.
+                                                          !! This is totally arbitrary (any way
+                                                          !! to get the compiler to tell us this?)
 
-    integer(IK),parameter :: chunk_size = 100_IK  !! for allocatable strings: allocate chunks of this size
+    integer(IK),parameter :: chunk_size = 256_IK  !! for allocatable strings: allocate chunks of this size
     integer(IK),parameter :: unit2str = -1_IK  !! unit number to cause stuff to be
                                                !! output to strings rather than files.
                                                !! See 9.5.6.12 in the F2003/08 standard
+    character(kind=CK,len=*),parameter :: blank_chunk = repeat(space, chunk_size) !! a blank string
 
     integer(IK),parameter :: seq_chunk_size = 256_IK !! chunk size for reading sequential files
+
+    integer(IK),parameter :: stream_chunk_size = 256_IK !! chunk size for reading stream files
+
+    integer(IK),parameter :: print_str_chunk_size = 1000_IK !! chunk size for writing JSON to a string
 
     integer(IK),parameter :: pushed_char_size = 10_IK !! size for `pushed_char`
                                                       !! array in [[json_core(type)]]
